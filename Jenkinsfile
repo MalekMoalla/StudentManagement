@@ -8,6 +8,7 @@ pipeline {
         DOCKER_IMAGE = 'malekmoalla/student-management'
         DOCKER_TAG = "v${BUILD_NUMBER}"
         SONAR_HOST_URL = 'http://localhost:9000'
+        KUBECONFIG = '/var/lib/jenkins/.kube/config'
     }
 
     stages {
@@ -47,7 +48,7 @@ pipeline {
 
         stage('Docker Build') {
             steps {
-                sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} ."
+                sh "docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} -t ${DOCKER_IMAGE}:latest ."
             }
         }
 
@@ -60,7 +61,25 @@ pipeline {
                 )]) {
                     sh "echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin"
                     sh "docker push ${DOCKER_IMAGE}:${DOCKER_TAG}"
+                    sh "docker push ${DOCKER_IMAGE}:latest"
                 }
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                sh '''
+                kubectl apply -f k8s/mysql-deployment.yaml -n devops
+                kubectl apply -f k8s/spring-deployment.yaml -n devops
+
+                kubectl set image deployment/spring-app spring-app=${DOCKER_IMAGE}:${DOCKER_TAG} -n devops
+
+                kubectl rollout status deployment/mysql -n devops
+                kubectl rollout status deployment/spring-app -n devops
+
+                kubectl get pods -n devops
+                kubectl get svc -n devops
+                '''
             }
         }
 
@@ -73,7 +92,7 @@ pipeline {
 
     post {
         success {
-            echo 'Build completed successfully.'
+            echo 'Build, Docker push, and Kubernetes deployment completed successfully.'
         }
         failure {
             echo 'Build failed.'
